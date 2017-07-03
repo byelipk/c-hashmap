@@ -1,0 +1,10 @@
+*.o
+*.dSYM
+/build
+/bin
+/scratch
+/tests/*_tests
+/tags
+/lib
+*.log
+/vendor
