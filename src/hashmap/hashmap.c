@@ -59,11 +59,11 @@ Hashmap * Hashmap_create(Hashmap_compare compare, Hashmap_hash hash)
 
     // Build the buckets
     map->buckets = DArray_init(sizeof(DArray *), DEFAULT_NUMBER_OF_BUCKETS);
+    check_mem(map->buckets);
 
     // fake out expanding the array
     map->buckets->end = map->buckets->max;
 
-    check_mem(map->buckets);
 
     return map;
 
@@ -125,9 +125,9 @@ static inline HashmapNode *Hashmap_node_create(int hash, void *key, void *data)
     HashmapNode * node = calloc(1, sizeof(HashmapNode));
     check_mem(node);
 
-    node->key   = key;
+    node->key  = key;
     node->data = data;
-    node->hash  = hash;
+    node->hash = hash;
 
     return node;
 
@@ -153,20 +153,20 @@ static inline DArray * Hashmap_find_bucket(
 {
     check(map != NULL, "Invalid map.");
 
-    uint32_t hash = map->hash(key);
-    int bucket_n  = hash % DEFAULT_NUMBER_OF_BUCKETS;
-    check(bucket_n >= 0, "Invalid bucket found: %d", bucket_n);
+    uint32_t hash  = map->hash(key);
+    int the_bucket = hash % DEFAULT_NUMBER_OF_BUCKETS;
+    check(the_bucket >= 0, "Invalid bucket found: %d", the_bucket);
 
     // Store it for the return so the caller can use it
     *hash_out = hash;
 
-    DArray * bucket = DArray_get(map->buckets, bucket_n);
+    DArray * bucket = DArray_get(map->buckets, the_bucket);
 
     if (!bucket && create) {
         // New bucket, set it up
         bucket = DArray_init(sizeof(void *), DEFAULT_NUMBER_OF_BUCKETS);
         check_mem(bucket);
-        DArray_set(map->buckets, bucket_n, bucket);
+        DArray_set(map->buckets, the_bucket, bucket);
     }
 
     return bucket;
@@ -208,12 +208,11 @@ error:
     ALGORITHM:
 
     For each node in bucket
-        Find node whose hash and key matches the one we're looking for
-
-        Return index position of node
+        If we found the node we're looking for
+            Return index position
 
 */
-static inline int Hashmap_get_node(
+static inline int Hashmap_index_of_node(
     Hashmap * map, uint32_t hash, DArray * bucket, void * key)
 {
     int i = 0;
@@ -221,8 +220,11 @@ static inline int Hashmap_get_node(
     for (i = 0; i < DArray_end(bucket); i++) {
         debug("TRY: %d", i);
         HashmapNode * node = DArray_get(bucket, i);
-        if (node->hash == hash && map->compare(node->key, key) == 0) {
-            return i;
+        if (node &&
+            node->hash == hash &&
+            map->compare(node->key, key) == 0) {
+
+            return i; // Find index position, return it
         }
     }
 
@@ -233,8 +235,8 @@ static inline int Hashmap_get_node(
 
     ALGORITHM:
 
-    Find bucket that contains the key we're looking for
-    Find the node in the bucket
+    Use key to find bucket
+    Find node in bucket
 
     Return data stored in the node
 
@@ -248,17 +250,17 @@ void * Hashmap_get(Hashmap * map, void * key)
         return NULL;
     }
 
-    int i = Hashmap_get_node(map, hash, bucket, key);
+    int i = Hashmap_index_of_node(map, hash, bucket, key);
     if (i == -1) {
         return NULL;
     }
+    else {
+        HashmapNode * node = DArray_get(bucket, i);
+        check(node != NULL,
+            "Failed to get node from bucket when it should exist.");
 
-    HashmapNode * node = DArray_get(bucket, i);
-    check(node != NULL,
-        "Failed to get node from bucket when it should exist.");
-
-    return node->data;
-
+        return node->data;
+    }
 error:
     return NULL;
 }
@@ -320,21 +322,26 @@ void * Hashmap_delete(Hashmap * map, void * key)
         return NULL;
     }
 
-    int i = Hashmap_get_node(map, hash, bucket, key);
+    int i = Hashmap_index_of_node(map, hash, bucket, key);
     if (i == -1) {
         return NULL;
     }
 
     HashmapNode * node = DArray_get(bucket, i);
-    void * data = node->data;
-    free(node);
+    if (node) {
+        void * data = node->data;
+        free(node);
 
-    HashmapNode * ending = DArray_pop(bucket);
+        HashmapNode * ending = DArray_pop(bucket);
 
-    if (ending != node) {
-        // Alright, looks like it's not the last one, so swap it
-        DArray_set(bucket, i, ending);
+        if (ending != node) {
+            // Alright, looks like it's not the last one, so swap it
+            DArray_set(bucket, i, ending);
+        }
+
+        return data;
     }
-
-    return data;
+    else {
+        return NULL;
+    }
 }
